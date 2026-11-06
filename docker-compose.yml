@@ -1,0 +1,18 @@
+# 代码目录整个挂进容器：config.json / tasks.json / 日志都落在宿主机这个目录，重建容器不丢
+services:
+  web:
+    build: { context: ., dockerfile: deploy/Dockerfile }
+    image: hnair-fare-hawk
+    command: python web_api.py
+    environment:
+      WEB_API_HOST: 0.0.0.0
+      WEB_API_PORT: "8502"
+    ports: ["8502:8502"]
+    volumes: ["./:/app"]
+    restart: unless-stopped
+  daemon:
+    image: hnair-fare-hawk
+    command: python daemon.py
+    volumes: ["./:/app"]
+    depends_on: [web]
+    restart: unless-stopped

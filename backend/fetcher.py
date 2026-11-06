@@ -1075,8 +1075,25 @@ def parse_curl_command(curl_cmd: str) -> Dict[str, Any]:
     if not curl_cmd or not isinstance(curl_cmd, str):
         return result
 
-    # 简单分词（保留引号内内容）
-    tokens = shlex.split(curl_cmd.strip())
+    # 手机抓包 App 复制出来的命令可能带弯引号、行尾续行符，先归一化再分词
+    text = curl_cmd.strip().replace("\\\r\n", " ").replace("\\\n", " ")
+    text = text.translate(str.maketrans({"‘": "'", "’": "'", "“": '"', "”": '"'}))
+    try:
+        tokens = shlex.split(text)
+    except ValueError:
+        tokens = text.split()
+    data_flags = ("-d", "--data", "--data-raw", "--data-binary", "--data-ascii", "--data-urlencode", "--json")
+    # 兼容 --data-raw={...} 与 -d'{...}' 这类值紧贴参数名的写法
+    expanded: List[str] = []
+    for tok in tokens:
+        flag = next((f for f in data_flags if f.startswith("--") and tok.startswith(f + "=")), None)
+        if flag:
+            expanded += [flag, tok[len(flag) + 1:]]
+        elif tok.startswith("-d") and not tok.startswith("--") and len(tok) > 2:
+            expanded += ["-d", tok[2:]]
+        else:
+            expanded.append(tok)
+    tokens = expanded
     i = 0
     while i < len(tokens):
         tok = tokens[i]
@@ -1099,10 +1116,14 @@ def parse_curl_command(curl_cmd: str) -> Dict[str, Any]:
             i += 1
             if i < len(tokens):
                 result["headers"]["cookie"] = tokens[i]
-        elif tok in ("-d", "--data", "--data-raw", "--data-binary"):
+        elif tok in data_flags:
             i += 1
             if i < len(tokens):
-                result["data"] = tokens[i]
+                data = tokens[i]
+                # bash 的 $'...' 写法分词后会在前面留下一个 $
+                if data.startswith("${") or data.startswith("$["):
+                    data = data[1:]
+                result["data"] = data
                 result["method"] = "POST"
         elif tok.startswith("http://") or tok.startswith("https://"):
             result["url"] = tok
