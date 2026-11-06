@@ -840,9 +840,16 @@ def run_one_round(state_mgr: AlertStateManager) -> bool:
                 continue
             companion = _companion_text(unit, req, results, task)
             seat_text = _seat_summary(item)
+            # 标题直接带日期、星期和起飞时刻：锁屏一眼看出是哪天早上还是晚上
+            dep = str((item.get("times") or {}).get("dep") or task.get("dep_time") or "").strip()
+            weekday = "一二三四五六日"[datetime.strptime(date, "%Y-%m-%d").weekday()]
+            alert_title = f"🎉 {from_city}→{to_city} {date[5:].replace('-', '/')}周{weekday} {dep} {flight} {price}元"
             # 保留 Server酱（向后兼容；公众号开关关闭时跳过）
             if wechat_enabled:
-                send_price_alert(send_keys, alert_task, flight, price, tiers=item.get("tiers"), extra=companion)
+                send_price_alert(
+                    send_keys, alert_task, flight, price, tiers=item.get("tiers"), extra=companion,
+                    title=alert_title, detail=_time_lines(alert_task, item) + f"\n余票：{seat_text}",
+                )
             else:
                 append_log("微信公众号通知已停用，跳过 Server酱低价提醒。")
             # 多通道通知：飞书交互卡片（确认/忽略回调）+ 企微/钉钉/Bark/ntfy
@@ -856,7 +863,6 @@ def run_one_round(state_mgr: AlertStateManager) -> bool:
                 cabin_list = []
             if cabin_list:
                 cabin_extra = f"，舱位条件：{'、'.join(cabin_list)}"
-            alert_title = f"🎉 {from_city}→{to_city} {price} 元"
             alert_content = (
                 f"航班：{flight}\n"
                 f"日期：{date}\n"

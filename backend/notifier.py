@@ -88,8 +88,13 @@ def send_price_alert(
     price: int,
     tiers=None,
     extra: str = "",
+    title: str = "",
+    detail: str = "",
 ) -> Dict[str, bool]:
-    """发送普通低价提醒（微信 Server酱，desp 支持 Markdown）；extra 为附加说明（如往返另一段价格）。"""
+    """发送普通低价提醒（微信 Server酱，desp 支持 Markdown）；extra 为附加说明（如往返另一段价格）。
+
+    title 不传时用默认标题；detail 为时刻、余票等逐行说明，放在价格下面。
+    """
     keys = _normalize_keys(send_keys)
     results: Dict[str, bool] = {}
     from_code = str(task.get("from_code", "-"))
@@ -101,7 +106,8 @@ def send_price_alert(
     from_city_short = code_to_city_only(from_code)
     to_city_short = code_to_city_only(to_code)
 
-    title = f"🎉 {from_city_short}→{to_city_short} {price} 元"
+    title = title or f"🎉 {from_city_short}→{to_city_short} {price} 元"
+    detail_md = "".join(f"{line}\n\n" for line in detail.splitlines() if line.strip())
     desp = (
         f"**航班**：{flight}\n\n"
         f"**日期**：{_date_range_str(task)}\n\n"
@@ -109,6 +115,7 @@ def send_price_alert(
         f"**类型**：{_fare_label(task.get('fare_type', ''))}（目标价 ≤ {task.get('target_price', '-')} 元 · 已达标 ✅）\n\n"
         f"**档位**：{tier_text(tiers)}\n\n"
         f"**价格**：**{price} 元**\n\n"
+        + detail_md
         + (f"**{extra}**\n\n" if extra else "")
         + "---\n\n"
         f"⏰ 查询时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
