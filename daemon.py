@@ -73,7 +73,8 @@ DEFAULT_CONFIG = {
     # 实时查价开关（防风控）：关闭后 daemon 不再请求海航接口
     "price_query": {"enabled": True, "min_interval": 8},
     "alert_cooldown": {
-        "hours": 1,  # 价格提醒冷却时间（小时），默认1小时
+        # 同一张票持续有票时的重复提醒间隔（小时）。票没了会清掉记录，再出现立刻提醒，所以这里可以很长
+        "hours": 720,
     },
 }
 
@@ -438,6 +439,30 @@ def _build_fingerprint(task: Dict[str, Any], flight: str, price: int) -> str:
     )
 
 
+def _clear_gone_alerts(state_mgr: AlertStateManager, req: Dict[str, Any], hits: List[Dict[str, Any]]) -> None:
+    """本次查询里没达标的航班清掉提醒记录：有票只提醒一次，票没了再出现才重新提醒。"""
+    hit_keys = {
+        (str(h["task"].get("id", "")), str(h["flight"]).strip().upper())
+        for h in hits
+        if h["req"] is req
+    }
+    prefixes = []
+    for task in req["tasks"]:
+        task_id = str(task.get("id", ""))
+        flight = str(task.get("flight_no", "") or "").strip().upper()
+        if flight and (task_id, flight) in hit_keys:
+            continue
+        if not flight and any(key[0] == task_id for key in hit_keys):
+            continue
+        base = "|".join([
+            task_id, req["date"], str(task.get("from_code", "")), str(task.get("to_code", "")),
+            str(task.get("fare_type", "normal")),
+        ])
+        prefixes.append(f"{base}|{flight}|" if flight else f"{base}|")
+    if prefixes:
+        state_mgr.clear_alerts(prefixes)
+
+
 def _task_seat_ok(task: Dict[str, Any], item: Dict[str, Any]) -> bool:
     """判断航班是否满足任务的余票/舱位监控条件。
 
@@ -733,6 +758,7 @@ def run_one_round(state_mgr: AlertStateManager) -> bool:
             results[(from_code, to_code, date)] = {"fares": fares or []}
             if not fares:
                 append_log("接口正常返回但无可用航班（无票或价格不可购）。")
+                _clear_gone_alerts(state_mgr, req, hits)
                 continue
 
             saw_prices = True
@@ -797,6 +823,7 @@ def run_one_round(state_mgr: AlertStateManager) -> bool:
                     if price <= target_price and _task_seat_ok(task, item) and _task_tier_ok(task, item):
                         hits.append({"req": req, "task": task, "item": item, "flight": flight, "price": price,
                                      "target_price": target_price, "fare_label": fare_label})
+            _clear_gone_alerts(state_mgr, req, hits)
 
         # 一组查完再发提醒：往返组的提醒里带上另一段同一时刻的价格。
         for hit in hits:
@@ -876,7 +903,7 @@ def main() -> None:
 
     # 读取配置中的冷却时间
     config = load_config()
-    alert_cooldown_hours = int(config.get("alert_cooldown", {}).get("hours", 1))
+    alert_cooldown_hours = int(config.get("alert_cooldown", {}).get("hours", DEFAULT_CONFIG["alert_cooldown"]["hours"]))
     window_seconds = alert_cooldown_hours * 3600
 
     state_mgr = AlertStateManager(state_path=STATE_PATH, window_seconds=window_seconds)

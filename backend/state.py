@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import portalocker
 
@@ -105,6 +105,15 @@ class AlertStateManager:
         data = self._load_state()
         data.setdefault("price_alerts", {})[fingerprint] = now
         self._save_state(data)
+
+    def clear_alerts(self, prefixes: List[str]) -> None:
+        """删除以这些前缀开头的提醒记录：票没了，下次再出现时会重新提醒。"""
+        data = self._load_state()
+        alerts = data.get("price_alerts", {})
+        kept = {k: v for k, v in alerts.items() if not any(k.startswith(p) for p in prefixes)}
+        if len(kept) != len(alerts):
+            data["price_alerts"] = kept
+            self._save_state(data)
 
     def should_send_token_alert(self, now_ts: float | None = None) -> bool:
         """Token 过期告警节流判断。"""
